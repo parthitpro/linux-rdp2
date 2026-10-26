@@ -18,9 +18,7 @@ jobs:
         run: |
           sudo sed -i 's/Prompt=.*/Prompt=never/' /etc/update-manager/release-upgrades
           sudo systemctl mask motd-news.timer 2>/dev/null || true
-          # Set system timezone directly to IST without D-Bus delay
           sudo ln -sf /usr/share/zoneinfo/Asia/Kolkata /etc/localtime
-          # Enable parallel downloads and fast disk operations
           echo 'Acquire::Queue-Mode "host";' | sudo tee /etc/apt/apt.conf.d/99parallel
           echo 'force-unsafe-io' | sudo tee /etc/dpkg/dpkg.cfg.d/force-unsafe-io
 
@@ -73,10 +71,9 @@ jobs:
 
       - name: Start Chrome Remote Desktop Host
         run: |
-          # Automatically assign clean name 'Ubuntu-Dev' and attach PIN 123456
-          CMD="${{ github.event.inputs.crd_code }}"
-          CUSTOM_CMD=$(echo "$CMD" | sed 's/--name=\$(hostname)/--name="Ubuntu-Dev"/')
-          $CUSTOM_CMD --pin=123456
+          RAW_CMD="${{ github.event.inputs.crd_code }}"
+          FINAL_CMD=$(echo "$RAW_CMD" | sed 's/--name=\$(hostname)/--name="Ubuntu-Dev"/')
+          eval "$FINAL_CMD --pin=123456"
 
       - name: Keep-Alive Loop
         run: |
