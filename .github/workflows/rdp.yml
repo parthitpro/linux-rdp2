@@ -1,4 +1,4 @@
-name: Ubuntu Desktop RDP
+name: Ubuntu Official GNOME RDP
 
 on:
   workflow_dispatch:
@@ -14,35 +14,48 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Disable Upgrade Prompts, Set IST & Optimize APT
+      - name: Disable Upgrade Notifications, Set IST & Optimize APT
         run: |
           sudo sed -i 's/Prompt=.*/Prompt=never/' /etc/update-manager/release-upgrades
           sudo systemctl mask motd-news.timer 2>/dev/null || true
-          # Set timezone to IST
+
+          # Set Timezone to IST (Asia/Kolkata)
           sudo ln -sf /usr/share/zoneinfo/Asia/Kolkata /etc/localtime
-          # Enable parallel connection downloads and bypass fsync delays
+          sudo timedatectl set-timezone Asia/Kolkata || true
+          timedatectl
+
+          # Parallel download queues and skip redundant fsync calls
           echo 'Acquire::Queue-Mode "host";' | sudo tee /etc/apt/apt.conf.d/99parallel
           echo 'force-unsafe-io' | sudo tee /etc/dpkg/dpkg.cfg.d/force-unsafe-io
 
-      - name: Checkout Same Repository to Workspace (Native Git)
-        run: |
-          git clone --depth=1 "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" workspace
+      - name: Checkout Same Repository to Workspace
+        uses: actions/checkout@v4
+        with:
+          path: workspace
 
-      - name: Install Desktop, Theme & Course Utilities
+      - name: Install Desktop, Tools, and Course Utilities
         run: |
           sudo apt-get update -y
           sudo DEBIAN_FRONTEND=noninteractive apt-get install --no-install-recommends -y \
-            xfce4 \
-            xfce4-terminal \
-            dbus-x11 \
-            xorg \
-            xvfb \
-            x11-xserver-utils \
+            ubuntu-desktop-minimal \
+            gnome-terminal \
+            gnome-shell-extension-ubuntu-dock \
+            gnome-shell-extension-desktop-icons-ng \
+            nautilus \
             gedit \
             gnome-system-monitor \
+            gnome-calculator \
+            gnome-characters \
+            yaru-theme-gnome-shell \
             yaru-theme-gtk \
             yaru-theme-icon \
+            ubuntu-wallpapers \
+            ubuntu-wallpapers-noble \
             fonts-ubuntu \
+            fonts-firacode \
+            fonts-dejavu-core \
+            dbus-x11 \
+            git \
             vim \
             ed \
             gawk \
@@ -51,11 +64,21 @@ jobs:
             dnsutils \
             net-tools \
             iputils-ping \
-            p7zip-full \
+            hwinfo \
+            lshw \
+            hdparm \
+            sysstat \
+            build-essential \
             zip \
-            unzip
+            unzip \
+            bzip2 \
+            p7zip-full \
+            cron \
+            at \
+            curl \
+            wget
 
-          # Place workspace directory directly on the Desktop
+          # Move repository workspace directly to Desktop
           mkdir -p /home/runner/Desktop
           mv workspace /home/runner/Desktop/workspace
           chown -R runner:runner /home/runner/Desktop/workspace
@@ -66,19 +89,34 @@ jobs:
           sudo dpkg -i google-chrome-stable_current_amd64.deb || sudo apt-get install -f -y
           rm -f google-chrome-stable_current_amd64.deb
 
-      - name: Configure Dark Theme, Typography & 12h Clock
+      - name: Pre-Configure GNOME Defaults with D-Bus Wrapping
         run: |
-          # Configure XFCE Theme to Yaru-dark
-          xfconf-query -c xsettings -p /Net/ThemeName -s "Yaru-dark" --create -t string || true
-          xfconf-query -c xsettings -p /Net/IconThemeName -s "Yaru" --create -t string || true
-          xfconf-query -c xfwm4 -p /general/theme -s "Yaru-dark" --create -t string || true
-          
-          # Set Monospace Font to Ubuntu Mono 13
-          xfconf-query -c xsettings -p /Gtk/MonospaceFontName -s "Ubuntu Mono 13" --create -t string || true
+          dbus-run-session -- bash << 'EOF'
+          # Apply dark theme and typography
+          gsettings set org.gnome.desktop.interface color-scheme 'prefer-dark'
+          gsettings set org.gnome.desktop.interface gtk-theme 'Yaru-dark'
+          gsettings set org.gnome.desktop.interface monospace-font-name 'Ubuntu Mono 13'
 
-          # Set top bar clock to 12-hour format with AM/PM
-          xfconf-query -c xfce4-panel -p /plugins/plugin-5/digital-time-format -s "%I:%M %p" --create -t string || true
-          xfconf-query -c xfce4-panel -p /plugins/plugin-5/digital-format -s "%I:%M %p" --create -t string || true
+          # Set top bar clock to 12-hour format
+          gsettings set org.gnome.desktop.interface clock-format '12h'
+
+          # Enable Minimize, Maximize, and Close buttons on top-right (Windows style)
+          gsettings set org.gnome.desktop.wm.preferences button-layout ':minimize,maximize,close'
+
+          # Enable extensions
+          gnome-extensions enable ding@rastersoft.com || true
+          gnome-extensions enable ubuntu-dock@ubuntu.com || true
+
+          # Move dock to BOTTOM and pin Terminal + Chrome + Files
+          gsettings set org.gnome.shell.extensions.dash-to-dock dock-position 'BOTTOM' || true
+          gsettings set org.gnome.shell.extensions.dash-to-dock extend-height false || true
+          gsettings set org.gnome.shell favorite-apps "['org.gnome.Terminal.desktop', 'google-chrome.desktop', 'org.gnome.Nautilus.desktop', 'gedit.desktop', 'gnome-system-monitor.desktop']" || true
+
+          # Set official Noble background
+          gsettings set org.gnome.desktop.background picture-uri 'file:///usr/share/backgrounds/Numbat_wallpaper_dimmed_3480x2160.png'
+          gsettings set org.gnome.desktop.background picture-uri-dark 'file:///usr/share/backgrounds/Numbat_wallpaper_dimmed_3480x2160.png'
+          gsettings set org.gnome.desktop.background picture-options 'zoom'
+          EOF
 
       - name: Download & Install Chrome Remote Desktop
         run: |
@@ -86,20 +124,18 @@ jobs:
           sudo dpkg --install chrome-remote-desktop_current_amd64.deb || sudo apt-get install -f -y
           rm -f chrome-remote-desktop_current_amd64.deb
 
-      - name: Configure Stable Desktop Session
+      - name: Configure GNOME Session and Screen Resolution
         run: |
-          sudo bash -c 'echo "exec /etc/X11/Xsession /usr/bin/xfce4-session" > /etc/chrome-remote-desktop-session'
+          sudo bash -c 'echo "exec /etc/X11/Xsession /usr/bin/gnome-session" > /etc/chrome-remote-desktop-session'
           echo 'export CHROME_REMOTE_DESKTOP_DEFAULT_DESKTOP_SIZES=1920x1080' | sudo tee -a /etc/environment
 
       - name: Start Chrome Remote Desktop Host
         run: |
-          RAW_CMD="${{ github.event.inputs.crd_code }}"
-          FINAL_CMD=$(echo "$RAW_CMD" | sed 's/--name=\$(hostname)/--name="Ubuntu-Dev"/')
-          eval "$FINAL_CMD --pin=123456"
+          eval "${{ github.event.inputs.crd_code }} --pin=123456"
 
       - name: Keep-Alive Loop
         run: |
-          echo "Remote Desktop is active! PIN is: 123456"
+          echo "Ubuntu GNOME RDP is active! PIN is: 123456"
           sleep 21600
 
       - name: Auto-Commit and Push Work on Exit
