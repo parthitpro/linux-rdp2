@@ -1,0 +1,98 @@
+name: Ubuntu Desktop RDP
+
+on:
+  workflow_dispatch:
+    inputs:
+      crd_code:
+        description: 'Paste fresh Chrome Remote Desktop Auth Command'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Disable Upgrade Prompts, Set IST & Optimize APT
+        run: |
+          sudo sed -i 's/Prompt=.*/Prompt=never/' /etc/update-manager/release-upgrades
+          sudo systemctl mask motd-news.timer 2>/dev/null || true
+          # Set system timezone directly to IST without D-Bus delay
+          sudo ln -sf /usr/share/zoneinfo/Asia/Kolkata /etc/localtime
+          # Enable parallel downloads and fast disk operations
+          echo 'Acquire::Queue-Mode "host";' | sudo tee /etc/apt/apt.conf.d/99parallel
+          echo 'force-unsafe-io' | sudo tee /etc/dpkg/dpkg.cfg.d/force-unsafe-io
+
+      - name: Checkout Same Repository to Workspace (Native Git)
+        run: |
+          git clone --depth=1 "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" workspace
+
+      - name: Install Desktop & Essential Course Tools
+        run: |
+          sudo apt-get update -y
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install --no-install-recommends -y \
+            xfce4 \
+            xfce4-terminal \
+            dbus-x11 \
+            xorg \
+            xvfb \
+            x11-xserver-utils \
+            yaru-theme-gtk \
+            yaru-theme-icon \
+            vim \
+            ed \
+            gawk \
+            bc \
+            ncal \
+            dnsutils \
+            net-tools \
+            iputils-ping
+
+          # Place workspace folder directly onto the Desktop
+          mkdir -p /home/runner/Desktop
+          mv workspace /home/runner/Desktop/workspace
+          chown -R runner:runner /home/runner/Desktop/workspace
+
+      - name: Install Google Chrome
+        run: |
+          wget -q https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+          sudo dpkg -i google-chrome-stable_current_amd64.deb || sudo apt-get install -f -y
+          rm -f google-chrome-stable_current_amd64.deb
+
+      - name: Download & Install Chrome Remote Desktop
+        run: |
+          wget -q https://dl.google.com/linux/direct/chrome-remote-desktop_current_amd64.deb
+          sudo dpkg --install chrome-remote-desktop_current_amd64.deb || sudo apt-get install -f -y
+          rm -f chrome-remote-desktop_current_amd64.deb
+
+      - name: Configure Stable Desktop Session
+        run: |
+          sudo bash -c 'echo "exec /etc/X11/Xsession /usr/bin/xfce4-session" > /etc/chrome-remote-desktop-session'
+          echo 'export CHROME_REMOTE_DESKTOP_DEFAULT_DESKTOP_SIZES=1920x1080' | sudo tee -a /etc/environment
+
+      - name: Start Chrome Remote Desktop Host
+        run: |
+          # Automatically assign clean name 'Ubuntu-Dev' and attach PIN 123456
+          CMD="${{ github.event.inputs.crd_code }}"
+          CUSTOM_CMD=$(echo "$CMD" | sed 's/--name=\$(hostname)/--name="Ubuntu-Dev"/')
+          $CUSTOM_CMD --pin=123456
+
+      - name: Keep-Alive Loop
+        run: |
+          echo "Remote Desktop is active! PIN is: 123456"
+          sleep 21600
+
+      - name: Auto-Commit and Push Work on Exit
+        if: always()
+        run: |
+          cd /home/runner/Desktop/workspace
+          git config user.name "GitHub Actions Runner"
+          git config user.email "runner@github.com"
+          git add -A
+          if ! git diff --staged --quiet; then
+            git commit -m "Auto-save session work [$(date -u +'%Y-%m-%d %H:%M:%S UTC')]"
+            git push origin HEAD:${{ github.ref_name }}
+          else
+            echo "No changes to save."
+          fi
